@@ -48,6 +48,7 @@
     "@eslint/js": "^9.39.4",
     "@glimmer/component": "^2.1.1",
     "@rollup/plugin-babel": "^7.1.0",
+    "@supabase/supabase-js": "^2.113.0",
     "@warp-drive/core": "~5.8.2",
     "@warp-drive/ember": "~5.8.2",
     "@warp-drive/json-api": "~5.8.2",

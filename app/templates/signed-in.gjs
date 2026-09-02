@@ -1,8 +1,7 @@
 import { pageTitle } from 'ember-page-title';
 
 <template>
-  {{pageTitle "CoachBot"}}
-  <h1>Welcome to Coach Bot!</h1>
+  {{pageTitle "SignedIn"}}
+  <h1>We are signed in</h1>
   {{outlet}}
-
 </template>
