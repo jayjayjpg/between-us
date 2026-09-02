@@ -1,1 +1,47 @@
 /* Ember supports plain CSS out of the box. More info: https://cli.emberjs.com/release/advanced-use/stylesheets/ */
+@import "tailwindcss";
+
+/*
+ * CoachBot dark theme.
+ * Dark purples + dark greys for surfaces, off-pink for links, off-green as
+ * the secondary accent. Add new design tokens here rather than hard-coding
+ * colors in templates.
+ */
+@theme {
+  --color-canvas: #1c1621; /* app background */
+  --color-surface: #241b2b; /* panels, nav, cards */
+  --color-border: #3b3442; /* dividers, outlines */
+  --color-ink: #ede6ee; /* primary text */
+  --color-muted: #b3a6bd; /* secondary text */
+  --color-link: #e7aec0; /* off-pink links */
+  --color-link-hover: #f5cdd9; /* lighter off-pink on hover/focus */
+  --color-accent: #9fc9ab; /* off-green accent */
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas text-ink min-h-screen;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-ink;
+  }
+
+  a {
+    @apply text-link decoration-transparent transition-colors duration-150;
+  }
+
+  a:hover,
+  a:focus-visible {
+    @apply text-link-hover underline;
+  }
+}

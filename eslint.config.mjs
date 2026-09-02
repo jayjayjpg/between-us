@@ -30,7 +30,10 @@ const esmParserOptions = {
 };
 
 export default defineConfig([
-  globalIgnores(['dist/', 'coverage/', '!**/.*']),
+  // supabase/functions/** runs on Deno, not Node/browser — a different
+  // runtime with its own globals, module resolution (remote URL imports),
+  // and TypeScript support this config doesn't set up.
+  globalIgnores(['dist/', 'coverage/', 'supabase/functions/', '!**/.*']),
   js.configs.recommended,
   eslintConfigPrettier,
   ember.configs.base,

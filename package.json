@@ -49,6 +49,7 @@
     "@glimmer/component": "^2.1.1",
     "@rollup/plugin-babel": "^7.1.0",
     "@supabase/supabase-js": "^2.113.0",
+    "@tailwindcss/vite": "^4.3.3",
     "@warp-drive/core": "~5.8.2",
     "@warp-drive/ember": "~5.8.2",
     "@warp-drive/json-api": "~5.8.2",
@@ -81,6 +82,7 @@
     "qunit-dom": "^3.5.1",
     "stylelint": "^17.13.0",
     "stylelint-config-standard": "^40.0.0",
+    "tailwindcss": "^4.3.3",
     "testem": "^3.20.1",
     "vite": "^8.1.0"
   },
