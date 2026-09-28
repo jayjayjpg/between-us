@@ -1,12 +1,11 @@
 import { pageTitle } from 'ember-page-title';
-import { LinkTo } from '@ember/routing';
+import PageContainer from 'coach-bot/components/page-container';
 import OnboardingChat from 'coach-bot/components/onboarding-chat';
 
 <template>
   {{pageTitle "Onboarding"}}
-  <div class="mx-auto max-w-5xl px-4 py-12">
-    <h1 class="text-2xl font-semibold">Onboarding Start</h1>
-    <LinkTo @route="index" class="text-sm">Back to home</LinkTo>
+  <PageContainer>
+    <h1 class="text-2xl font-semibold">Onboarding</h1>
 
     <div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
       <div class="flex flex-col gap-4">
@@ -35,6 +34,6 @@ import OnboardingChat from 'coach-bot/components/onboarding-chat';
 
       <OnboardingChat />
     </div>
-  </div>
+  </PageContainer>
   {{outlet}}
 </template>

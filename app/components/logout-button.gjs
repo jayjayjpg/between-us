@@ -31,6 +31,7 @@ export default class LogoutButton extends Component {
       disabled={{this.isLoggingOut}}
       {{on "click" this.logout}}
       class="rounded-md bg-accent px-4 py-2 font-medium text-canvas transition-colors hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-60"
+      ...attributes
     >
       {{if this.isLoggingOut "Logging out…" "Logout"}}
     </button>

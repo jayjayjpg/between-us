@@ -9,4 +9,17 @@ export default class ConversationModel extends Model {
 
   @attr('string') createdAt;
   @attr('string') updatedAt;
+
+  // The chat edge function's AI-generated recap of this conversation, for
+  // the admin chat-log detail view — see the `add_conversation_summary`
+  // migration and `updateOnboardingAndSummary` in the edge function. Only
+  // ever populated by `admin.js`; `null` until the bot concludes the
+  // conversation at least once.
+  @attr('string') summary;
+
+  get sortedMessages() {
+    return [...this.messages].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+  }
 }

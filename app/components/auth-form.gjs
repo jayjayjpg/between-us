@@ -4,6 +4,7 @@ import { action } from '@ember/object';
 import { service } from '@ember/service';
 import { fn } from '@ember/helper';
 import { on } from '@ember/modifier';
+import { LinkTo } from '@ember/routing';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_MIN_LENGTH = 8;
@@ -194,7 +195,13 @@ export default class AuthForm extends Component {
         await this.session.signIn(credentials);
       }
 
-      this.router.transitionTo('signed-in.onboarding');
+      // Admins land on the chat-log list rather than their own onboarding
+      // chat — `session.user` is populated synchronously by signIn/signUp
+      // above, so this is already known by the time we get here.
+      const destination = this.session.user?.isAdmin
+        ? 'signed-in.admin.chats'
+        : 'signed-in.onboarding';
+      this.router.transitionTo(destination);
     } catch (error) {
       this.serverError = error.message;
     } finally {
@@ -311,6 +318,11 @@ export default class AuthForm extends Component {
             role="alert"
             class="text-sm text-red-400"
           >{{this.passwordError}}</p>
+        {{/if}}
+        {{#if this.isLogin}}
+          <LinkTo @route="forgot-password" class="self-start text-sm">
+            Forgot your password?
+          </LinkTo>
         {{/if}}
       </div>
 

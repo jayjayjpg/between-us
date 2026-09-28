@@ -1,8 +1,8 @@
 import { pageTitle } from 'ember-page-title';
+import SiteHeader from 'coach-bot/components/site-header';
 
 <template>
   {{pageTitle "CoachBot"}}
-  <h1>Welcome to Coach Bot!</h1>
+  <SiteHeader />
   {{outlet}}
-
 </template>

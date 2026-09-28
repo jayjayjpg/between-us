@@ -24,6 +24,14 @@ export default class SessionService extends Service {
     return Boolean(this.user);
   }
 
+  // Whether this browser is here via a password-recovery link — see
+  // `supabase.js`. `reset-password-form.gjs` uses this to decide whether to
+  // show the "set a new password" form or an "invalid/expired link"
+  // message.
+  get isPasswordRecovery() {
+    return this.supabase.passwordRecoveryDetected;
+  }
+
   async restore() {
     const {
       data: { session },
@@ -88,6 +96,35 @@ export default class SessionService extends Service {
     this.user = null;
   }
 
+  // Emails a reset-your-password link. Supabase deliberately doesn't
+  // distinguish "no account for this email" from success here (to avoid
+  // leaking which emails are registered) — callers should show the same
+  // generic "check your email" message regardless.
+  async requestPasswordReset({ email }) {
+    const { error } = await this.supabase.client.auth.resetPasswordForEmail(
+      email,
+      { redirectTo: `${window.location.origin}/reset-password` },
+    );
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  // Only succeeds while `isPasswordRecovery` is true — Supabase applies
+  // this to whichever account the recovery link's session belongs to.
+  async updatePassword({ password }) {
+    const { error } = await this.supabase.client.auth.updateUser({
+      password,
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    this.supabase.clearPasswordRecovery();
+  }
+
   #applySession(session) {
     this.user = session?.user ? this.#pushUser(session.user) : null;
   }
@@ -99,6 +136,7 @@ export default class SessionService extends Service {
         id: supabaseUser.id,
         attributes: {
           email: supabaseUser.email,
+          role: supabaseUser.app_metadata?.role ?? null,
         },
       },
     });

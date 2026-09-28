@@ -11,8 +11,4 @@ export default class SignedInRoute extends Route {
       this.router.transitionTo('login');
     }
   }
-
-  model() {
-    return this.session.user;
-  }
 }

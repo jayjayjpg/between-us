@@ -13,6 +13,10 @@ export default class OnboardingChat extends Component {
   @tracked draft = '';
   @tracked isSending = false;
   @tracked sendError = null;
+  // Set only by the initial load below — a failed send has its own
+  // `sendError` instead, since by then there's already a conversation on
+  // screen and a second, separately-styled box would just be clutter.
+  @tracked loadError = null;
   // Shown immediately on submit, before the real (persisted) message comes
   // back from the `chat` service — so the user sees what they just sent
   // right away instead of waiting on the full round trip.
@@ -20,7 +24,19 @@ export default class OnboardingChat extends Component {
 
   constructor(owner, args) {
     super(owner, args);
-    this.chat.loadConversation();
+    this.loadInitialConversation();
+  }
+
+  // Wraps `chat.loadConversation()` so a failure here — the only call site
+  // with no other error already on screen to lean on — actually reaches
+  // the user instead of becoming a silent unhandled rejection (the
+  // constructor can't be `async`, so nothing else would catch it).
+  async loadInitialConversation() {
+    try {
+      await this.chat.loadConversation();
+    } catch (error) {
+      this.loadError = error.message;
+    }
   }
 
   get messages() {
@@ -81,8 +97,17 @@ export default class OnboardingChat extends Component {
       this.sendError = error.message;
       // The user's message may already be saved server-side even though
       // the exchange as a whole failed (e.g. Claude timed out) — resync so
-      // it isn't silently lost from view.
-      await this.chat.loadConversation();
+      // it isn't silently lost from view. `sendError` above is already the
+      // actionable message for the user; a resync failure on top of that
+      // just means the view may be briefly stale, not worth a second box.
+      try {
+        await this.chat.loadConversation();
+      } catch (resyncError) {
+        console.error(
+          'Failed to resync conversation after a failed send',
+          resyncError,
+        );
+      }
     } finally {
       this.isSending = false;
       this.scrollToLatest();
@@ -112,6 +137,8 @@ export default class OnboardingChat extends Component {
       >
         {{#if this.chat.isLoadingHistory}}
           <p class="text-sm text-muted">Loading your conversation…</p>
+        {{else if this.loadError}}
+          <p role="alert" class="text-sm text-red-400">{{this.loadError}}</p>
         {{else if this.hasVisibleContent}}
           {{#each this.messages as |message|}}
             <div
@@ -165,7 +192,7 @@ export default class OnboardingChat extends Component {
 
       <form
         {{on "submit" this.handleSubmit}}
-        class="flex items-end gap-2 border-t border-border p-3"
+        class="flex items-center gap-2 border-t border-border p-3"
       >
         <div class="flex-1">
           <label for="chat-message" class="sr-only">Message</label>
@@ -178,7 +205,7 @@ export default class OnboardingChat extends Component {
             value={{this.draft}}
             {{on "input" this.updateDraft}}
             {{on "keydown" this.handleKeydown}}
-            class="w-full resize-none rounded-md border border-border bg-canvas px-3 py-2 text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+            class="block w-full resize-none rounded-md border border-border bg-canvas px-3 py-2 text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
           ></textarea>
         </div>
         <button
