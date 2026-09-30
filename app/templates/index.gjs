@@ -5,7 +5,7 @@ import PageContainer from 'coach-bot/components/page-container';
   {{pageTitle "Home"}}
   <PageContainer>
     <h1 class="text-2xl font-semibold">Home</h1>
-    <p class="mt-2 text-sm text-muted">Welcome to Coach Bot.</p>
+    <p class="mt-2 text-sm text-muted">Welcome to Between Us.</p>
   </PageContainer>
   {{outlet}}
 </template>

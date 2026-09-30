@@ -1,7 +1,7 @@
 import Route from '@ember/routing/route';
 import { service } from '@ember/service';
 
-// Guards every route nested under here (currently just `chats`) on the
+// Guards every route nested under here (`chats` and `user`) on the
 // signed-in user having the admin role. `signed-in`'s own `beforeModel`
 // already guarantees the visitor is authenticated and `session.user` is
 // loaded by the time this runs, so no need to re-check that here.

@@ -1,4 +1,4 @@
-import Model, { attr } from '@warp-drive/legacy/model';
+import Model, { attr, belongsTo } from '@warp-drive/legacy/model';
 
 // Represents a Supabase auth user. The signed-in user's own record is
 // pushed by `session.js` straight from Supabase auth responses (signUp /
@@ -35,4 +35,11 @@ export default class UserModel extends Model {
   get isOnboarded() {
     return this.onboardingStatus === 'onboarded';
   }
+
+  // AI-inferred traits meant to help the human listener prepare for this
+  // user's follow-up call -- see `caller-profile.js`. Shares this user's
+  // own id rather than a separate foreign key (mirroring the 1:1
+  // `caller_profiles` table), so there's no natural inverse on the
+  // `caller-profile` side; only ever populated by `admin.js`.
+  @belongsTo('caller-profile', { async: false, inverse: null }) callerProfile;
 }

@@ -2,6 +2,12 @@ import Service, { service } from '@ember/service';
 
 const EXCERPT_LENGTH = 120;
 
+// Shared between `loadConversationDetail` and `loadUserProfile` -- both
+// need every `caller_profiles` column, and keeping one copy means the two
+// can't silently drift apart as fields get added.
+const CALLER_PROFILE_COLUMNS =
+  'user_id, mood, neuroticism, entitlement, self_reflection, willingness_to_change, descriptiveness, defensiveness, satisfaction, estimated_gender, estimated_gender_confidence, estimated_age_bracket, estimated_age_confidence, education_level, education_level_confidence, political_alignment, political_alignment_confidence, messages_analyzed, last_analyzed_at';
+
 // Read-only (aside from `markUserOnboarded`) queries for the admin area.
 //
 // `loadConversationSummaries` deliberately returns plain data rather than
@@ -53,11 +59,16 @@ export default class AdminService extends Service {
 
   // Loads one conversation's full message log, its AI-generated summary
   // (if the bot has concluded it at least once — see the chat edge
-  // function), and its owning user's profile (email, name, last login,
-  // onboarding status — from `public.profiles`), and pushes all of it into
-  // the store. Returns the pushed `conversation` record; read its messages
-  // via `conversation.sortedMessages`, its summary via `conversation.summary`,
-  // and its owner via `conversation.user`.
+  // function), its owning user's profile (email, name, last login,
+  // onboarding status — from `public.profiles`), and that user's
+  // AI-inferred caller profile (from `public.caller_profiles`, if one has
+  // been computed yet — see `analyzeCallerProfile` in the chat edge
+  // function), and pushes all of it into the store. Returns the pushed
+  // `conversation` record; read its messages via
+  // `conversation.sortedMessages`, its summary via `conversation.summary`,
+  // its owner via `conversation.user`, and that owner's caller profile via
+  // `conversation.user.callerProfile` (`null` until at least one message
+  // has been analyzed).
   async loadConversationDetail(conversationId) {
     const { data: conversationRow, error: conversationError } =
       await this.supabase.client
@@ -70,18 +81,24 @@ export default class AdminService extends Service {
       throw new Error(conversationError?.message ?? 'Conversation not found');
     }
 
-    const [messagesResult, profileResult] = await Promise.all([
-      this.supabase.client
-        .from('messages')
-        .select('id, role, content, created_at')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true }),
-      this.supabase.client
-        .from('profiles')
-        .select('id, email, full_name, last_sign_in_at, onboarding_status')
-        .eq('id', conversationRow.user_id)
-        .maybeSingle(),
-    ]);
+    const [messagesResult, profileResult, callerProfileResult] =
+      await Promise.all([
+        this.supabase.client
+          .from('messages')
+          .select('id, role, content, created_at')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true }),
+        this.supabase.client
+          .from('profiles')
+          .select('id, email, full_name, last_sign_in_at, onboarding_status')
+          .eq('id', conversationRow.user_id)
+          .maybeSingle(),
+        this.supabase.client
+          .from('caller_profiles')
+          .select(CALLER_PROFILE_COLUMNS)
+          .eq('user_id', conversationRow.user_id)
+          .maybeSingle(),
+      ]);
 
     if (messagesResult.error) {
       throw new Error(messagesResult.error.message);
@@ -89,9 +106,15 @@ export default class AdminService extends Service {
     if (profileResult.error) {
       throw new Error(profileResult.error.message);
     }
+    if (callerProfileResult.error) {
+      throw new Error(callerProfileResult.error.message);
+    }
 
     if (profileResult.data) {
       this.#pushUser(profileResult.data);
+    }
+    if (callerProfileResult.data) {
+      this.#pushCallerProfile(callerProfileResult.data);
     }
 
     const conversation = this.#pushConversation(conversationRow);
@@ -100,6 +123,61 @@ export default class AdminService extends Service {
     }
 
     return conversation;
+  }
+
+  // Backs `/signed-in/admin/users/:user_id` — loads one user's basic
+  // profile plus their caller profile (if computed yet), pushes both into
+  // the store, and also returns the id of their most recent conversation
+  // (if any), so the page can link back to its chat-log detail view.
+  // Unlike `loadConversationDetail`, this is keyed by a user id with no
+  // conversation already in hand, so the "most recent conversation" lookup
+  // has to happen here rather than being a given.
+  async loadUserProfile(userId) {
+    const [profileResult, callerProfileResult, conversationResult] =
+      await Promise.all([
+        this.supabase.client
+          .from('profiles')
+          .select('id, email, full_name, last_sign_in_at, onboarding_status')
+          .eq('id', userId)
+          .maybeSingle(),
+        this.supabase.client
+          .from('caller_profiles')
+          .select(CALLER_PROFILE_COLUMNS)
+          .eq('user_id', userId)
+          .maybeSingle(),
+        this.supabase.client
+          .from('conversations')
+          .select('id')
+          .eq('user_id', userId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+    if (profileResult.error) {
+      throw new Error(profileResult.error.message);
+    }
+    if (callerProfileResult.error) {
+      throw new Error(callerProfileResult.error.message);
+    }
+    if (conversationResult.error) {
+      throw new Error(conversationResult.error.message);
+    }
+
+    if (!profileResult.data) {
+      throw new Error('User not found');
+    }
+
+    // Push order matters: `#pushCallerProfile` also re-pushes `user` with
+    // just the relationship pointer set, so `#pushUser`'s attributes need
+    // to already be in the store first — see the comment in
+    // `#pushCallerProfile` for why that side has to be set explicitly.
+    const user = this.#pushUser(profileResult.data);
+    if (callerProfileResult.data) {
+      this.#pushCallerProfile(callerProfileResult.data);
+    }
+
+    return { user, latestConversationId: conversationResult.data?.id ?? null };
   }
 
   // Moves a user from 'pending' to 'onboarded'. Only succeeds if they're
@@ -172,6 +250,51 @@ export default class AdminService extends Service {
         },
       },
     });
+  }
+
+  #pushCallerProfile(row) {
+    const callerProfile = this.store.push({
+      data: {
+        type: 'caller-profile',
+        id: row.user_id,
+        attributes: {
+          mood: row.mood,
+          neuroticism: row.neuroticism,
+          entitlement: row.entitlement,
+          selfReflection: row.self_reflection,
+          willingnessToChange: row.willingness_to_change,
+          descriptiveness: row.descriptiveness,
+          defensiveness: row.defensiveness,
+          satisfaction: row.satisfaction,
+          estimatedGender: row.estimated_gender,
+          estimatedGenderConfidence: row.estimated_gender_confidence,
+          estimatedAgeBracket: row.estimated_age_bracket,
+          estimatedAgeConfidence: row.estimated_age_confidence,
+          educationLevel: row.education_level,
+          educationLevelConfidence: row.education_level_confidence,
+          politicalAlignment: row.political_alignment,
+          politicalAlignmentConfidence: row.political_alignment_confidence,
+          messagesAnalyzed: row.messages_analyzed,
+          lastAnalyzedAt: row.last_analyzed_at,
+        },
+      },
+    });
+
+    // `user belongsTo callerProfile` has no inverse (see user.js), so the
+    // link has to be set explicitly from this side too.
+    this.store.push({
+      data: {
+        type: 'user',
+        id: row.user_id,
+        relationships: {
+          callerProfile: {
+            data: { type: 'caller-profile', id: row.user_id },
+          },
+        },
+      },
+    });
+
+    return callerProfile;
   }
 
   #pushConversation(row) {

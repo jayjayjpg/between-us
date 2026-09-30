@@ -1,4 +1,5 @@
 import { pageTitle } from 'ember-page-title';
+import { LinkTo } from '@ember/routing';
 import PageContainer from 'coach-bot/components/page-container';
 import MarkOnboardedButton from 'coach-bot/components/mark-onboarded-button';
 
@@ -33,6 +34,12 @@ import MarkOnboardedButton from 'coach-bot/components/mark-onboarded-button';
             }}
           </h2>
 
+          <LinkTo
+            @route="signed-in.admin.user"
+            @model={{@model.conversation.user.id}}
+            class="mt-1 inline-block text-sm text-accent hover:underline"
+          >View user profile →</LinkTo>
+
           <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
             <dt class="text-muted">Email</dt>
             <dd
@@ -63,6 +70,65 @@ import MarkOnboardedButton from 'coach-bot/components/mark-onboarded-button';
             <div class="mt-4">
               <MarkOnboardedButton @userId={{@model.conversation.user.id}} />
             </div>
+          {{/if}}
+
+          {{#if @model.conversation.user.callerProfile}}
+            {{#let @model.conversation.user.callerProfile as |profile|}}
+              <div class="mt-4 border-t border-accent/30 pt-4">
+                <h3
+                  class="text-xs font-semibold tracking-wide text-accent uppercase"
+                >Caller profile</h3>
+                <p class="mt-1 text-xs text-muted">
+                  AI-estimated from
+                  {{profile.messagesAnalyzedLabel}}
+                  — a signal for the listener, not a diagnosis.
+                </p>
+
+                <dl
+                  class="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm"
+                >
+                  <dt class="text-muted">Mood</dt>
+                  <dd class="text-ink">{{profile.moodLabel}}</dd>
+
+                  <dt class="text-muted">Neuroticism</dt>
+                  <dd class="text-ink">{{profile.neuroticismLabel}}</dd>
+
+                  <dt class="text-muted">Entitlement</dt>
+                  <dd class="text-ink">{{profile.entitlementLabel}}</dd>
+
+                  <dt class="text-muted">Self-reflection</dt>
+                  <dd class="text-ink">{{profile.selfReflectionLabel}}</dd>
+
+                  <dt class="text-muted">Willingness to change</dt>
+                  <dd class="text-ink">{{profile.willingnessToChangeLabel}}</dd>
+
+                  <dt class="text-muted">Descriptiveness</dt>
+                  <dd class="text-ink">{{profile.descriptivenessLabel}}</dd>
+
+                  <dt class="text-muted">Defensiveness</dt>
+                  <dd class="text-ink">{{profile.defensivenessLabel}}</dd>
+
+                  <dt class="text-muted">Satisfaction</dt>
+                  <dd class="text-ink">{{profile.satisfactionLabel}}</dd>
+
+                  <dt class="text-muted">Estimated gender</dt>
+                  <dd class="text-ink">{{profile.estimatedGenderDisplay}}</dd>
+
+                  <dt class="text-muted">Estimated age</dt>
+                  <dd
+                    class="text-ink"
+                  >{{profile.estimatedAgeBracketDisplay}}</dd>
+
+                  <dt class="text-muted">Education level</dt>
+                  <dd class="text-ink">{{profile.educationLevelDisplay}}</dd>
+
+                  <dt class="text-muted">Political alignment</dt>
+                  <dd
+                    class="text-ink"
+                  >{{profile.politicalAlignmentDisplay}}</dd>
+                </dl>
+              </div>
+            {{/let}}
           {{/if}}
         </div>
 

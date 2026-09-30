@@ -23,7 +23,7 @@ export default class SiteHeader extends Component {
           @route={{this.homeRoute}}
           class="text-lg font-semibold text-ink"
         >
-          Coach Bot
+          Between Us
         </LinkTo>
 
         <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">

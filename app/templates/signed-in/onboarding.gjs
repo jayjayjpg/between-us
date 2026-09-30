@@ -30,6 +30,14 @@ import OnboardingChat from 'coach-bot/components/onboarding-chat';
           about an hour, one-to-one, with a real person whose only job is to
           listen.
         </p>
+        <p class="text-sm text-muted">
+          To help your listener prepare, we also use AI to estimate things like
+          your overall mood, how open or guarded your answers are, and
+          background details you share or that come through in how you write —
+          for example, age range, education, gender, or political leanings. This
+          is only ever seen by your listener, never sold, published, or shared
+          anywhere else.
+        </p>
       </div>
 
       <OnboardingChat />
