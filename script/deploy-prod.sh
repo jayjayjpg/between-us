@@ -10,6 +10,15 @@
 # every push to the connected branch, using its own configured env vars
 # (see CLAUDE.md) -- the build step below exists for a local,
 # production-equivalent sanity build, not to publish it anywhere itself.
+# Netlify *does* run this exact script, though (its configured build
+# command), which is why every Supabase CLI call below goes through `npx`
+# rather than a bare `supabase`: the CLI isn't preinstalled on Netlify's
+# build image, and global installs of it are exactly what its own docs
+# steer you away from, so it's a normal `devDependency` in package.json
+# instead (`npm install`, which Netlify always runs before the build
+# command, pulls it into node_modules/.bin) -- `npx` is what resolves that
+# local copy, on Netlify and locally alike, without assuming anything
+# about the machine it's running on beyond Node/npm.
 #
 # `supabase db push` has no `--project-ref` flag (unlike `functions
 # deploy`) -- it only ever pushes to whichever project is currently
@@ -27,7 +36,7 @@ PROD_PROJECT_REF="hhqotvloounlbzwdvfhh"
 
 restore_dev_link() {
   echo "==> Restoring Supabase CLI link to dev project ($DEV_PROJECT_REF)..."
-  supabase link --project-ref "$DEV_PROJECT_REF"
+  npx supabase link --project-ref "$DEV_PROJECT_REF"
 }
 trap restore_dev_link EXIT
 
@@ -35,17 +44,17 @@ echo "==> Building frontend (production mode)..."
 vite build
 
 echo "==> Linking Supabase CLI to production project ($PROD_PROJECT_REF)..."
-supabase link --project-ref "$PROD_PROJECT_REF"
+npx supabase link --project-ref "$PROD_PROJECT_REF"
 
 echo "==> Applying pending database migrations to production..."
 # Idempotent either way: against a brand-new project with no migrations
 # recorded yet, this applies every migration in order (first-time setup);
 # against one that's already up to date through some earlier point, it
 # only applies whatever's new since then (redeploy).
-supabase db push
+npx supabase db push
 
 echo "==> Deploying edge functions to production..."
-supabase functions deploy chat manage-user recompute-caller-profiles \
+npx supabase functions deploy chat manage-user recompute-caller-profiles \
   --project-ref "$PROD_PROJECT_REF"
 
 echo "==> Production deploy complete."
