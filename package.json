@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "vite build",
+    "deploy:prod": "bash script/deploy-prod.sh",
     "format": "prettier . --cache --write",
     "lint": "concurrently \"npm:lint:*(!fix)\" --names \"lint:\" --prefixColors auto",
     "lint:css": "stylelint \"**/*.css\"",

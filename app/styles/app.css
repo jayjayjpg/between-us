@@ -16,6 +16,7 @@
   --color-link: #e7aec0; /* off-pink links */
   --color-link-hover: #f5cdd9; /* lighter off-pink on hover/focus */
   --color-accent: #9fc9ab; /* off-green accent */
+  --color-disabled: #57525e; /* neutral grey for a "no data" disabled look, deliberately untinted unlike the rest of the palette */
 }
 
 @layer base {

@@ -113,52 +113,29 @@ export default class CallerProfileModel extends Model {
   // lint rules, and a runtime-built arbitrary-value class like `w-[37%]`
   // wouldn't be in the compiled CSS either, since Tailwind only generates
   // classes it finds written out literally somewhere -- see
-  // `barWidthClass` below for the literal set) alongside its existing
-  // `*Label` -- used by the `/users/:user_id` profile page to render a
-  // little bar graph per trait without repeating the same shape eight
-  // times in the template. `chat.gjs`'s plain `<dt>/<dd>` listing reads the
-  // individual `*Label` getters directly instead, since it has no graph to
-  // draw.
+  // `barWidthClass` below for the literal set), a `hasValue` flag (for the
+  // track's disabled-look background when there's no data at all -- see
+  // the template), and its own `valueLabel` -- built from `scoreLabel`
+  // with a bar-specific "cannot be determined" in place of the `*Label`
+  // getters' generic "Unknown", since only this graph needs that wording
+  // -- used by the `/users/:user_id` profile page to render a little bar
+  // graph per trait without repeating the same shape eight times in the
+  // template. `chat.gjs`'s plain `<dt>/<dd>` listing reads the individual
+  // `*Label` getters directly instead, since it has no graph to draw.
   get scoreBars() {
     return [
-      { label: 'Mood', value: this.mood, valueLabel: this.moodLabel },
-      {
-        label: 'Neuroticism',
-        value: this.neuroticism,
-        valueLabel: this.neuroticismLabel,
-      },
-      {
-        label: 'Entitlement',
-        value: this.entitlement,
-        valueLabel: this.entitlementLabel,
-      },
-      {
-        label: 'Self-reflection',
-        value: this.selfReflection,
-        valueLabel: this.selfReflectionLabel,
-      },
-      {
-        label: 'Willingness to change',
-        value: this.willingnessToChange,
-        valueLabel: this.willingnessToChangeLabel,
-      },
-      {
-        label: 'Descriptiveness',
-        value: this.descriptiveness,
-        valueLabel: this.descriptivenessLabel,
-      },
-      {
-        label: 'Defensiveness',
-        value: this.defensiveness,
-        valueLabel: this.defensivenessLabel,
-      },
-      {
-        label: 'Satisfaction',
-        value: this.satisfaction,
-        valueLabel: this.satisfactionLabel,
-      },
+      { label: 'Mood', value: this.mood },
+      { label: 'Neuroticism', value: this.neuroticism },
+      { label: 'Entitlement', value: this.entitlement },
+      { label: 'Self-reflection', value: this.selfReflection },
+      { label: 'Willingness to change', value: this.willingnessToChange },
+      { label: 'Descriptiveness', value: this.descriptiveness },
+      { label: 'Defensiveness', value: this.defensiveness },
+      { label: 'Satisfaction', value: this.satisfaction },
     ].map((trait) => ({
       ...trait,
+      valueLabel: scoreLabel(trait.value, 'cannot be determined'),
+      hasValue: typeof trait.value === 'number',
       barWidthClass: barWidthClass(trait.value),
     }));
   }
@@ -209,9 +186,9 @@ export default class CallerProfileModel extends Model {
   }
 }
 
-function scoreLabel(value) {
+function scoreLabel(value, unknownLabel = 'Unknown') {
   if (typeof value !== 'number') {
-    return 'Unknown';
+    return unknownLabel;
   }
   const index = Math.min(
     SCORE_LABELS.length - 1,
@@ -223,15 +200,22 @@ function scoreLabel(value) {
 // Every literal class name Tailwind needs to actually generate the CSS for
 // -- listed out here so its content scanner finds them (see the comment on
 // `scoreBars`). Bucketed the same way as `SCORE_LABELS`, so a bar's fill
-// width always lines up with its own text label.
-const BAR_WIDTH_CLASSES = ['w-0', 'w-1/4', 'w-1/2', 'w-3/4', 'w-full'];
+// width always lines up with its own text label -- except the lowest
+// bucket, which uses a fixed 5% sliver (`w-[5%]`) instead of `w-0`: a
+// genuinely low-but-known value (even one that rounds to virtually zero)
+// should still read as *some* value on the bar, visually distinct from no
+// data at all, which is the one case that actually renders as fully empty
+// -- see the null branch below.
+const BAR_WIDTH_CLASSES = ['w-[5%]', 'w-1/4', 'w-1/2', 'w-3/4', 'w-full'];
 
-// A missing value (no analysis yet) renders as an empty bar rather than a
-// misleading "0% full = very low" reading; the accompanying `valueLabel`
-// ("Unknown") is what actually communicates that distinction.
+// No value at all (no analysis yet, or this particular trait came back
+// with no signal) renders as a fully empty bar -- paired in the template
+// with a disabled-looking grey track background, so it reads clearly as
+// "no data" rather than "lowest possible score" (which is what the
+// lowest BAR_WIDTH_CLASSES entry is for instead).
 function barWidthClass(value) {
   if (typeof value !== 'number') {
-    return BAR_WIDTH_CLASSES[0];
+    return 'w-0';
   }
   const index = Math.min(
     BAR_WIDTH_CLASSES.length - 1,

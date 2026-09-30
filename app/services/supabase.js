@@ -1,13 +1,30 @@
 import Service from '@ember/service';
 import { tracked } from '@glimmer/tracking';
 import { createClient } from '@supabase/supabase-js';
+import { macroCondition, isDevelopingApp } from '@embroider/macros';
 
-const supabaseUrl = import.meta.env.CHAT_BOT_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.CHAT_BOT_SUPABASE_ANON_KEY;
+// `.env` holds two full sets of credentials, `_DEV`/`_PROD`-suffixed, for
+// the two separate Supabase projects this app can point at -- which one
+// actually applies is a property of how *this bundle* was built, not
+// something to decide at runtime, so `isDevelopingApp()` (the same
+// build-time dev/production check `app.js` already uses to conditionally
+// pull in the deprecation workflow) picks the suffix here too, via
+// `macroCondition` so it's resolved when Vite builds the app rather than
+// read from a runtime flag. A `vite build` (no `--mode development`) is a
+// production build and reads the `_PROD` pair; `vite build --mode
+// development` and `npm run start`/`npm run test` (dev server, tests) read
+// `_DEV`.
+const supabaseUrl = macroCondition(isDevelopingApp())
+  ? import.meta.env.CHAT_BOT_SUPABASE_URL_DEV
+  : import.meta.env.CHAT_BOT_SUPABASE_URL_PROD;
+const supabaseAnonKey = macroCondition(isDevelopingApp())
+  ? import.meta.env.CHAT_BOT_SUPABASE_ANON_KEY_DEV
+  : import.meta.env.CHAT_BOT_SUPABASE_ANON_KEY_PROD;
 
 if (!supabaseUrl || !supabaseAnonKey) {
+  const suffix = macroCondition(isDevelopingApp()) ? '_DEV' : '_PROD';
   throw new Error(
-    'Missing Supabase configuration. Set CHAT_BOT_SUPABASE_URL and CHAT_BOT_SUPABASE_ANON_KEY (see .env.development).',
+    `Missing Supabase configuration. Set CHAT_BOT_SUPABASE_URL${suffix} and CHAT_BOT_SUPABASE_ANON_KEY${suffix} in .env.`,
   );
 }
 

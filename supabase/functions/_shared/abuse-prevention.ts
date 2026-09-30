@@ -32,6 +32,63 @@ export const BOT_USER_AGENT_PATTERNS = [
   /^okhttp/i,
 ];
 
+// AI (OpenRouter/Jev) usage quota, shared for the same reason as the rate
+// limit / suspicious-activity checks above -- both `chat` (chat replies,
+// summaries) and `recompute-caller-profiles` (bulk Jev recompute) spend
+// from it.
+export const AI_DAILY_LIMIT = 120;
+
+export interface AiUsageResult {
+  allowed: boolean;
+  currentCount: number;
+  limit: number;
+}
+
+export async function checkAiUsage(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  limit: number,
+): Promise<AiUsageResult> {
+  const { data, error } = await supabase
+    .rpc('increment_ai_usage', { p_limit: limit })
+    .single();
+
+  if (error) {
+    // Same fail-open reasoning as checkRateLimit.
+    console.error('AI usage check failed -- allowing request', error);
+    return { allowed: true, currentCount: 0, limit };
+  }
+
+  return { allowed: data.allowed, currentCount: data.current_count, limit };
+}
+
+function secondsUntilNextUtcMidnight(): number {
+  const now = new Date();
+  const nextMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0,
+  );
+  return Math.max(0, Math.round((nextMidnight - now.getTime()) / 1000));
+}
+
+export function aiQuotaExceededResponse(result: AiUsageResult): Response {
+  const retryAfterSeconds = secondsUntilNextUtcMidnight();
+
+  return jsonResponse(
+    {
+      error: `You've reached your daily limit of ${result.limit} AI-assisted messages. Your quota resets at midnight UTC.`,
+      retryAfterSeconds,
+    },
+    429,
+    { 'Retry-After': String(retryAfterSeconds) },
+  );
+}
+
 export interface RateLimitResult {
   allowed: boolean;
   currentCount: number;

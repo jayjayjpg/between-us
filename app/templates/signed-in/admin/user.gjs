@@ -62,7 +62,10 @@ import PageContainer from 'coach-bot/components/page-container';
                     <span class="text-muted">{{bar.label}}</span>
                     <span class="font-medium text-ink">{{bar.valueLabel}}</span>
                   </div>
-                  <div class="mt-1 h-2 w-full rounded-full bg-border">
+                  <div
+                    class="mt-1 h-2 w-full rounded-full
+                      {{if bar.hasValue 'bg-border' 'bg-disabled'}}"
+                  >
                     <div
                       class="h-2 rounded-full bg-accent {{bar.barWidthClass}}"
                     ></div>

@@ -25,17 +25,20 @@
 //
 // Secrets this function needs (`supabase secrets set NAME=value`):
 //   OPENROUTER_API_KEY   required -- copy the value of
-//                         CHAT_BOT_OPENROUTER_API_KEY from coach-bot/.env.
-//                         This is a *separate* secret store from that .env
-//                         file (which ships to the browser) -- the key must
-//                         only ever live here, never in the Ember app.
+//                         CHAT_BOT_OPENROUTER_API_KEY_DEV (or _PROD,
+//                         matching whichever Supabase project -- dev or
+//                         prod -- you're setting secrets on) from
+//                         coach-bot/.env. This is a *separate* secret
+//                         store from that .env file (which ships to the
+//                         browser) -- the key must only ever live here,
+//                         never in the Ember app.
 //   OPENROUTER_MODEL      optional -- defaults to "typesafe/jev-router"
 //   JEV_MODEL              optional -- defaults to "~typesafe/jev-latest".
 //                         Used for caller-profile analysis (see
-//                         `analyzeCallerProfile`), via OpenRouter's
-//                         Decisions API rather than chat completions -- no
-//                         separate API key needed, this reuses
-//                         OPENROUTER_API_KEY above.
+//                         `../_shared/caller-profile.ts`), via
+//                         OpenRouter's Decisions API rather than chat
+//                         completions -- no separate API key needed, this
+//                         reuses OPENROUTER_API_KEY above.
 //
 // SUPABASE_URL and SUPABASE_ANON_KEY are injected automatically by the
 // platform for every edge function -- no need to set those yourself. This
@@ -48,20 +51,14 @@ import {
   checkRateLimit,
   rateLimitExceededResponse,
   checkSuspiciousActivity,
+  checkAiUsage,
+  aiQuotaExceededResponse,
+  AI_DAILY_LIMIT,
 } from '../_shared/abuse-prevention.ts';
+import { analyzeCallerProfile } from '../_shared/caller-profile.ts';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'typesafe/jev-router';
-
-// TypeSafe's Jev decision model, called via OpenRouter's Decisions API
-// (a different endpoint/shape than chat completions above) to compute the
-// caller profile -- see `analyzeCallerProfile`.
-const JEV_DECISIONS_API_URL = 'https://openrouter.ai/api/alpha/decisions';
-// Note the leading `~` -- this is OpenRouter's alias syntax for "latest",
-// distinct from the primary `typesafe/jev-1.13` id (both work; this just
-// tracks new releases automatically). Omitting it 400s with "Model ...
-// does not exist" rather than falling back to the primary id.
-const DEFAULT_JEV_MODEL = '~typesafe/jev-latest';
 
 // Emitted by the model at the end of its reply once it concludes the
 // conversation, so this function can tell that happened without trying to
@@ -132,7 +129,6 @@ Lead with the emotional theme of the conversation, then the most pressing proble
 // itself is generic over 'read' (60/minute) vs 'write' (10/minute) so a
 // future read-only endpoint can reuse it with the other bucket.
 const RATE_LIMIT_WRITE_PER_MINUTE = 10;
-const AI_DAILY_LIMIT = 120;
 
 interface ChatRequestBody {
   conversationId?: string | null;
@@ -350,6 +346,34 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: 'Got a reply, but saving it failed' }, 500);
   }
 
+  // Caller-profile analysis needs the user's *entire* history across every
+  // conversation they've ever had -- a caller profile is a property of the
+  // user, not of a single conversation -- so it's re-fetched fresh here by
+  // `user_id` rather than reusing `history` above, which is scoped to just
+  // this conversation. Fetched after the assistant message is saved, so it
+  // naturally already includes that reply -- no need to append it the way
+  // `updateOnboardingAndSummary` does with `replyText` below.
+  //
+  // This was originally just `analyzeCallerProfile(supabase, history, ...)`
+  // -- reusing the conversation-scoped `history` -- which meant every new
+  // conversation a user started silently reset their profile to whatever
+  // that one conversation alone contained, discarding everything already
+  // learned from their earlier conversations. Caught when a profile that
+  // should have reflected 40 messages across 3 conversations showed
+  // "estimated from 1 message" after a single-message test conversation.
+  const { data: fullHistory, error: fullHistoryError } = await supabase
+    .from('messages')
+    .select('role, content')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true });
+
+  if (fullHistoryError) {
+    console.error(
+      'Failed to load full history for caller-profile analysis',
+      fullHistoryError,
+    );
+  }
+
   // Onboarding-status advancement, summary (re)generation, and
   // caller-profile analysis are all best-effort and independent of each
   // other, so they run concurrently rather than serially adding to
@@ -365,7 +389,9 @@ Deno.serve(async (req: Request) => {
       concluded,
       openRouterApiKey,
     }),
-    analyzeCallerProfile(supabase, history, replyText, openRouterApiKey),
+    fullHistory
+      ? analyzeCallerProfile(supabase, fullHistory, openRouterApiKey)
+      : Promise.resolve(false),
   ]);
 
   return jsonResponse({
@@ -374,59 +400,6 @@ Deno.serve(async (req: Request) => {
     assistantMessage: toWireMessage(assistantMessage),
   });
 });
-
-// --- Daily AI usage quota ---------------------------------------------
-
-interface AiUsageResult {
-  allowed: boolean;
-  currentCount: number;
-  limit: number;
-}
-
-async function checkAiUsage(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  limit: number,
-): Promise<AiUsageResult> {
-  const { data, error } = await supabase
-    .rpc('increment_ai_usage', { p_limit: limit })
-    .single();
-
-  if (error) {
-    // Same fail-open reasoning as checkRateLimit.
-    console.error('AI usage check failed -- allowing request', error);
-    return { allowed: true, currentCount: 0, limit };
-  }
-
-  return { allowed: data.allowed, currentCount: data.current_count, limit };
-}
-
-function secondsUntilNextUtcMidnight(): number {
-  const now = new Date();
-  const nextMidnight = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() + 1,
-    0,
-    0,
-    0,
-    0,
-  );
-  return Math.max(0, Math.round((nextMidnight - now.getTime()) / 1000));
-}
-
-function aiQuotaExceededResponse(result: AiUsageResult): Response {
-  const retryAfterSeconds = secondsUntilNextUtcMidnight();
-
-  return jsonResponse(
-    {
-      error: `You've reached your daily limit of ${result.limit} AI-assisted messages. Your quota resets at midnight UTC.`,
-      retryAfterSeconds,
-    },
-    429,
-    { 'Retry-After': String(retryAfterSeconds) },
-  );
-}
 
 // --- Onboarding status + summary bookkeeping -----------------------------
 
@@ -541,389 +514,6 @@ async function updateOnboardingAndSummary({
     }
   } catch (error) {
     console.error('Failed to (re)generate conversation summary', error);
-  }
-}
-
-// --- Caller profile analysis -----------------------------------------------
-//
-// Computes the "caller profile" surfaced to admins on the chat-log detail
-// page: a set of traits meant to help the human listener approach the
-// follow-up call well-informed -- see `caller_profiles` in
-// `add_caller_profiles.sql` for the full field list and the privacy
-// reasoning behind how it's written. Unlike the case-note summary (only
-// generated once the onboarding conversation has actually concluded), this
-// runs after *every* message, since the traits it tracks are meant to
-// reflect the caller's most recent state rather than a one-time
-// end-of-conversation judgment.
-//
-// Uses OpenRouter's Decisions API (`typesafe/jev-*`) rather than chat
-// completions: each trait is a typed question (a 0-1 "score" on an ordinal
-// scale, or a "choice" among fixed options) answered with a probability/
-// confidence rather than generated prose, which is a better fit for
-// structured trait extraction than asking a chat model to emit JSON. See
-// OpenRouter's `/api/alpha/decisions` docs for the request/response shape.
-
-// A `score` question's `criteria` is an ordinal scale (index 0 = the low
-// end, last index = the high end); a `choice` question's `criteria` maps
-// each allowed option key to a description of when to pick it. Every
-// choice question below includes an explicit 'unknown' option and is
-// instructed to prefer it over a low-confidence guess -- see
-// `choiceQuestion` -- since a wrong demographic guess shown to the
-// listener as if it were fact is worse than admitting there's no clear
-// signal.
-interface ScoreQuestion {
-  type: 'score';
-  instructions: string;
-  criteria: string[];
-}
-interface ChoiceQuestion {
-  type: 'choice';
-  instructions: string;
-  criteria: Record<string, string>;
-}
-
-const CALLER_PROFILE_INSTRUCTION_PREFIX =
-  "Base this only on the caller's own messages (not the assistant's) in the onboarding conversation given as `state`.";
-
-function scoreQuestion(
-  instructions: string,
-  criteria: string[],
-): ScoreQuestion {
-  return {
-    type: 'score',
-    instructions: `${CALLER_PROFILE_INSTRUCTION_PREFIX} ${instructions}`,
-    criteria,
-  };
-}
-
-function choiceQuestion(
-  instructions: string,
-  criteria: Record<string, string>,
-): ChoiceQuestion {
-  return {
-    type: 'choice',
-    instructions: `${CALLER_PROFILE_INSTRUCTION_PREFIX} ${instructions} Choose "unknown" unless there is clear, unambiguous signal for one of the other options -- never guess.`,
-    criteria,
-  };
-}
-
-function buildCallerProfileQuestions(): Record<
-  string,
-  ScoreQuestion | ChoiceQuestion
-> {
-  return {
-    mood: scoreQuestion(
-      "Estimate the caller's overall mood across their messages.",
-      [
-        'Very negative or distressed',
-        'Somewhat negative or down',
-        'Mixed or neutral',
-        'Somewhat positive or hopeful',
-        'Very positive or upbeat',
-      ],
-    ),
-    neuroticism: scoreQuestion(
-      "Estimate the caller's neuroticism -- emotional reactivity and tendency toward anxiety or worry.",
-      [
-        'Very emotionally stable, calm under stress',
-        'Generally stable, occasional worry',
-        'Moderate emotional reactivity',
-        'Frequently anxious or reactive',
-        'Highly anxious, easily overwhelmed',
-      ],
-    ),
-    entitlement: scoreQuestion(
-      "Estimate the caller's sense of entitlement -- how much they expect special treatment or exceptions versus accepting normal constraints.",
-      [
-        'Not entitled at all, very accommodating',
-        'Mostly accommodating',
-        'Balanced expectations',
-        'Somewhat expects special treatment',
-        'Strong sense of deserving special treatment',
-      ],
-    ),
-    self_reflection: scoreQuestion(
-      "Estimate the caller's ability to self-reflect -- insight into their own role and patterns, versus externalizing blame.",
-      [
-        'Little to no self-reflection, mostly external blame',
-        'Limited self-reflection',
-        'Some self-awareness',
-        'Good self-awareness and insight',
-        'Highly self-reflective and insightful',
-      ],
-    ),
-    willingness_to_change: scoreQuestion(
-      'Estimate the willingness to change their own behavior or circumstances, as opposed to wanting others or the situation to change instead.',
-      [
-        'Resistant to change',
-        'Reluctant, some openness',
-        'Ambivalent',
-        'Open to change',
-        'Highly motivated to change',
-      ],
-    ),
-    descriptiveness: scoreQuestion(
-      "Estimate how descriptive and detailed the caller's messages are.",
-      [
-        'Extremely terse, minimal detail',
-        'Brief, limited detail',
-        'Moderate detail',
-        'Descriptive, good detail',
-        'Highly descriptive and detailed',
-      ],
-    ),
-    defensiveness: scoreQuestion(
-      "Estimate how defensive the caller is -- do they answer the assistant's questions eagerly and directly, or evade/deflect many of them?",
-      [
-        'Very open, answers eagerly and directly',
-        'Mostly open',
-        'Mixed openness',
-        'Often evasive or deflecting',
-        'Very defensive, frequently evades questions',
-      ],
-    ),
-    satisfaction: scoreQuestion(
-      "Estimate the caller's satisfaction with their current life situation overall, independent of the specific problem they came to talk about.",
-      [
-        'Very dissatisfied',
-        'Somewhat dissatisfied',
-        'Mixed or neutral',
-        'Somewhat satisfied',
-        'Very satisfied',
-      ],
-    ),
-    estimated_gender: choiceQuestion(
-      "Estimate the caller's gender, from what they explicitly disclose or from clear or indirect contextual signals in how they write.",
-      {
-        male: 'Caller discloses or clearly signals they are male.',
-        female: 'Caller discloses or clearly signals they are female.',
-        nonbinary_or_other: 'Caller discloses a gender outside male/female.',
-        unknown: 'Not enough information to make any reasonable estimate.',
-      },
-    ),
-    estimated_age_bracket: choiceQuestion(
-      "Estimate the caller's age bracket, from what they explicitly disclose or from clear (life stage, references, etc.) or indirect (tone, vocabulary, expressiveness, etc.) contextual signal in their messages.",
-      {
-        under_18: 'Clear signal the caller is under 18.',
-        '18_24': 'Clear signal the caller is 18 to 24.',
-        '25_34': 'Clear signal the caller is 25 to 34.',
-        '35_44': 'Clear signal the caller is 35 to 44.',
-        '45_54': 'Clear signal the caller is 45 to 54.',
-        '55_64': 'Clear signal the caller is 55 to 64.',
-        '65_plus': 'Clear signal the caller is 65 or older.',
-        unknown: 'Not enough information to make any reasonable estimate.',
-      },
-    ),
-    education_level: choiceQuestion(
-      "Estimate the caller's level of education, from what they explicitly disclose or from the vocabulary and complexity of their language.",
-      {
-        less_than_high_school:
-          'Clear signal of less than a high-school-level education.',
-        high_school: 'Clear signal of a high-school-level education.',
-        some_college: 'Clear signal of some college but no degree.',
-        bachelors: "Clear signal of a bachelor's-level education.",
-        graduate: 'Clear signal of a graduate-level education.',
-        unknown: 'Not enough information to make any reasonable estimate.',
-      },
-    ),
-    political_alignment: choiceQuestion(
-      "Estimate the caller's political alignment, only from clear, explicit signal in what they say -- never from unrelated demographic assumptions.",
-      {
-        extreme_left: 'Clear signal of a far-left political alignment.',
-        left: 'Clear signal of a left-leaning political alignment.',
-        centrist: 'Clear signal of a centrist political alignment.',
-        right: 'Clear signal of a right-leaning political alignment.',
-        extreme_right: 'Clear signal of a far-right political alignment.',
-        unknown:
-          'Not enough information to make any reasonable estimate -- this should be the default for almost every caller, since political alignment rarely comes up in this kind of conversation.',
-      },
-    ),
-  };
-}
-
-async function submitCallerProfileDecisions(
-  history: HistoryEntry[],
-  questions: Record<string, ScoreQuestion | ChoiceQuestion>,
-  apiKey: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<Record<string, any>> {
-  const model = Deno.env.get('JEV_MODEL') || DEFAULT_JEV_MODEL;
-
-  const state = {
-    conversation: history
-      .filter((entry) => entry.role === 'user' || entry.role === 'assistant')
-      .map((entry) => ({ role: entry.role, content: entry.content })),
-  };
-
-  const response = await fetch(JEV_DECISIONS_API_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-      'x-title': 'Coach Bot',
-    },
-    body: JSON.stringify({
-      model,
-      state,
-      questions,
-      // Same confidentiality constraint as callOpenRouter -- see the
-      // comment there. Just as important here: this content is a
-      // confidential onboarding conversation either way.
-      provider: { data_collection: 'deny', zdr: true },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(
-      `OpenRouter Decisions API error (${response.status}): ${errorBody}`,
-    );
-  }
-
-  const payload = await response.json();
-  const answers = payload?.answers;
-  if (!answers) {
-    throw new Error('OpenRouter Decisions API returned no answers');
-  }
-  return answers;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-// A `score` answer's `score` field is a fractional index into that
-// question's `criteria` array (e.g. 1.99 out of a 5-item, 0-4 scale), not
-// already normalized -- this maps it to 0-1 using that same question's own
-// scale length, so a stored value means the same thing regardless of how
-// many levels a given question's criteria array happens to have.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizedScore(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  answers: Record<string, any>,
-  key: string,
-  levels: number,
-): number | null {
-  const answer = answers?.[key];
-  if (!answer || typeof answer.score !== 'number' || levels <= 1) {
-    return null;
-  }
-  return clamp(answer.score / (levels - 1), 0, 1);
-}
-
-function choiceValue(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  answers: Record<string, any>,
-  key: string,
-): { value: string; confidence: number | null } {
-  const answer = answers?.[key];
-  if (!answer || typeof answer.choice !== 'string') {
-    return { value: 'unknown', confidence: null };
-  }
-  return {
-    value: answer.choice,
-    confidence:
-      typeof answer.confidence === 'number' ? answer.confidence : null,
-  };
-}
-
-async function analyzeCallerProfile(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  history: HistoryEntry[],
-  replyText: string,
-  openRouterApiKey: string,
-): Promise<void> {
-  const callerMessageCount = history.filter(
-    (entry) => entry.role === 'user',
-  ).length;
-  if (callerMessageCount === 0) {
-    // Nothing from the caller yet to analyze (shouldn't normally happen,
-    // since this runs right after saving their message).
-    return;
-  }
-
-  // Best-effort and independently AI-quota-checked, same reasoning as the
-  // summary regeneration above: this is another AI call riding along with
-  // the reply, and skipping it for a quota-exhausted user shouldn't fail a
-  // reply that already succeeded and was saved.
-  const aiUsage = await checkAiUsage(supabase, AI_DAILY_LIMIT);
-  if (!aiUsage.allowed) {
-    console.warn('Skipping caller-profile analysis: daily AI quota exhausted.');
-    return;
-  }
-
-  try {
-    const fullHistory = [...history, { role: 'assistant', content: replyText }];
-    const questions = buildCallerProfileQuestions();
-    const answers = await submitCallerProfileDecisions(
-      fullHistory,
-      questions,
-      openRouterApiKey,
-    );
-
-    const gender = choiceValue(answers, 'estimated_gender');
-    const age = choiceValue(answers, 'estimated_age_bracket');
-    const education = choiceValue(answers, 'education_level');
-    const political = choiceValue(answers, 'political_alignment');
-
-    const { error } = await supabase.rpc('upsert_caller_profile', {
-      p_mood: normalizedScore(
-        answers,
-        'mood',
-        (questions.mood as ScoreQuestion).criteria.length,
-      ),
-      p_neuroticism: normalizedScore(
-        answers,
-        'neuroticism',
-        (questions.neuroticism as ScoreQuestion).criteria.length,
-      ),
-      p_entitlement: normalizedScore(
-        answers,
-        'entitlement',
-        (questions.entitlement as ScoreQuestion).criteria.length,
-      ),
-      p_self_reflection: normalizedScore(
-        answers,
-        'self_reflection',
-        (questions.self_reflection as ScoreQuestion).criteria.length,
-      ),
-      p_willingness_to_change: normalizedScore(
-        answers,
-        'willingness_to_change',
-        (questions.willingness_to_change as ScoreQuestion).criteria.length,
-      ),
-      p_descriptiveness: normalizedScore(
-        answers,
-        'descriptiveness',
-        (questions.descriptiveness as ScoreQuestion).criteria.length,
-      ),
-      p_defensiveness: normalizedScore(
-        answers,
-        'defensiveness',
-        (questions.defensiveness as ScoreQuestion).criteria.length,
-      ),
-      p_satisfaction: normalizedScore(
-        answers,
-        'satisfaction',
-        (questions.satisfaction as ScoreQuestion).criteria.length,
-      ),
-      p_estimated_gender: gender.value,
-      p_estimated_gender_confidence: gender.confidence,
-      p_estimated_age_bracket: age.value,
-      p_estimated_age_confidence: age.confidence,
-      p_education_level: education.value,
-      p_education_level_confidence: education.confidence,
-      p_political_alignment: political.value,
-      p_political_alignment_confidence: political.confidence,
-      p_messages_analyzed: callerMessageCount,
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-  } catch (error) {
-    console.error('Failed to (re)generate caller profile', error);
   }
 }
 
