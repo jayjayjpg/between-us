@@ -693,7 +693,7 @@ function buildCallerProfileQuestions(): Record<
       ],
     ),
     estimated_gender: choiceQuestion(
-      "Estimate the caller's gender, from what they explicitly disclose or from clear contextual signal in how they write.",
+      "Estimate the caller's gender, from what they explicitly disclose or from clear or indirect contextual signals in how they write.",
       {
         male: 'Caller discloses or clearly signals they are male.',
         female: 'Caller discloses or clearly signals they are female.',
@@ -702,7 +702,7 @@ function buildCallerProfileQuestions(): Record<
       },
     ),
     estimated_age_bracket: choiceQuestion(
-      "Estimate the caller's age bracket, from what they explicitly disclose or from clear contextual signal (life stage, references, etc.) in their messages.",
+      "Estimate the caller's age bracket, from what they explicitly disclose or from clear (life stage, references, etc.) or indirect (tone, vocabulary, expressiveness, etc.) contextual signal in their messages.",
       {
         under_18: 'Clear signal the caller is under 18.',
         '18_24': 'Clear signal the caller is 18 to 24.',
