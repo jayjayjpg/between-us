@@ -1,5 +1,24 @@
 import Service, { service } from '@ember/service';
 import { tracked } from '@glimmer/tracking';
+import { macroCondition, isDevelopingApp } from '@embroider/macros';
+
+// Base URL Supabase redirects back to after an email-confirmation or
+// password-reset link is clicked -- `CHAT_BOT_SITE_URL_DEV`/`_PROD` in
+// `.env`, picked the same build-time way `supabase.js` picks its own
+// `_DEV`/`_PROD` credentials (see that file's comment for why
+// `macroCondition`/`isDevelopingApp()` rather than a runtime flag).
+// Previously `requestPasswordReset` used `window.location.origin`
+// instead, which happened to work but ties the redirect to wherever the
+// page was loaded from rather than to a value this app actually controls
+// (e.g. a preview-deploy URL rather than the canonical one) -- both flows
+// now use the same explicit, intentional value. Whatever this resolves
+// to also needs to be in that Supabase project's Auth -> URL
+// Configuration -> Redirect URLs allowlist, in every environment this
+// app is served from, or Supabase will refuse the redirect (same
+// requirement `reset-password`'s own URL already had).
+const siteUrl = macroCondition(isDevelopingApp())
+  ? import.meta.env.CHAT_BOT_SITE_URL_DEV
+  : import.meta.env.CHAT_BOT_SITE_URL_PROD;
 
 // Owns Supabase auth state and keeps it mirrored into the `user` model in
 // the store. UI code should go through this service rather than talking to
@@ -52,6 +71,7 @@ export default class SessionService extends Service {
     const { data, error } = await this.supabase.client.auth.signUp({
       email,
       password,
+      options: { emailRedirectTo: siteUrl },
     });
 
     if (error) {
@@ -103,7 +123,7 @@ export default class SessionService extends Service {
   async requestPasswordReset({ email }) {
     const { error } = await this.supabase.client.auth.resetPasswordForEmail(
       email,
-      { redirectTo: `${window.location.origin}/reset-password` },
+      { redirectTo: `${siteUrl}/reset-password` },
     );
 
     if (error) {
