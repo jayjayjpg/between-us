@@ -1,0 +1,30 @@
+# This app is a client-side-routed SPA with no server-side rendering --
+# Ember's router only ever runs once index.html's JS bundle has loaded and
+# booted, so it only ever handles a route if that route change happened
+# *after* the app was already running (an in-app <LinkTo>, a
+# browser-history back/forward). A hard refresh or a direct visit to any
+# deep URL (e.g. /signed-in/admin/chats) instead goes straight to Netlify,
+# which -- correctly, from its point of view -- looks for a real file at
+# that path, finds none (there is no dist/signed-in/admin/chats; that path
+# only ever existed as a client-side route), and 404s before Ember ever
+# gets a chance to run.
+#
+# The fix isn't to pre-render each route into a matching directory
+# structure -- that's static-site generation, which this app doesn't use
+# and doesn't need. It's to tell Netlify to serve index.html (status 200,
+# not a redirect) for any path that doesn't match a real file in dist/,
+# so the browser's URL bar keeps the original deep-link URL but the
+# *content* served is the same app shell every route already boots from.
+# Ember's router then reads that URL itself and renders the matching
+# route client-side, running the exact same guards
+# (`signed-in.js` -> login, `admin.js` -> not-found, etc.) it already runs
+# for in-app navigation -- there's nothing else to implement for the
+# "redirect to home when auth/permissions fail" behavior the user wants on
+# a hard refresh; it's already there, this just lets it actually run.
+#
+# This file lives in public/, not dist/, because dist/ is build output
+# (gitignored, regenerated on every build) -- anything in public/ is
+# copied into dist/ verbatim by the build (see public/robots.txt showing
+# up at dist/robots.txt already), so this ships automatically whether the
+# build runs locally or on Netlify.
+/*  /index.html  200
